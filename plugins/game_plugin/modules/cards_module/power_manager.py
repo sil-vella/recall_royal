@@ -7,15 +7,22 @@ class PowerManager:
         self.powers = {}
         self.load_powers()
 
-    def load_powers(self, power_folder="plugins.game_plugin.modules.cards_module.powers"):
+    def load_powers(self, power_folder="plugins/game_plugin/modules/cards_module/powers"):
         """Dynamically loads all power modules."""
-        for file in os.listdir(power_folder):
-            if file.endswith(".py") and file != "__init__.py":
-                module_name = f"{power_folder}.{file[:-3]}"
-                module = importlib.import_module(module_name)
-                power_class = getattr(module, file[:-3].capitalize(), None)
-                if power_class:
-                    self.powers[power_class.ID] = power_class  # Store class reference
+        try:
+            if not os.path.exists(power_folder):
+                print(f"Warning: Power folder {power_folder} does not exist.")
+                return
+
+            for file in os.listdir(power_folder):
+                if file.endswith(".py") and file != "__init__.py":
+                    module_name = f"{power_folder}.{file[:-3]}"
+                    module = importlib.import_module(module_name)
+                    power_class = getattr(module, file[:-3].capitalize(), None)
+                    if power_class:
+                        self.powers[power_class.ID] = power_class  # Store class reference
+        except Exception as e:
+            print(f"Warning: Failed to load powers: {e}")
 
     def get_power(self, power_id, player):
         """Retrieves and initializes a power instance for a player, checking expiration."""
