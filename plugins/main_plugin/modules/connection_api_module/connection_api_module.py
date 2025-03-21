@@ -11,8 +11,10 @@ from flask_limiter.util import get_remote_address
 from redis import Redis
 from tools.logger.custom_logging import custom_log
 from utils.config.config import Config  # Import global config
+from ..base_module import SecureBaseModule
+import time
 
-class ConnectionApiModule:
+class ConnectionApiModule(SecureBaseModule):
     """Handles database connection pooling, Redis caching, authentication, rate-limiting, and API security."""
     
     db_pool = None
@@ -26,6 +28,9 @@ class ConnectionApiModule:
 
         self.app = app_manager.flask_app
         self.app_manager = app_manager
+        
+        # Initialize SecureBaseModule after validating app_manager
+        super().__init__(app_manager)
 
         # ✅ Initialize PostgreSQL connection pool
         if not ConnectionApiModule.db_pool:
@@ -44,29 +49,52 @@ class ConnectionApiModule:
         # ✅ Initialize Redis client for caching
         self.redis_client = Redis.from_url(Config.RATE_LIMIT_STORAGE_URL, decode_responses=True)
 
+        custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}")
+
+    def initialize(self, flask_app):
+        """Initialize the module with additional setup after registration."""
+        if not flask_app:
+            raise RuntimeError("❌ ConnectionApiModule requires a valid Flask app instance.")
+            
         # ✅ Use Redis for Flask-Limiter (Rate limiting)
         self.limiter = Limiter(
             key_func=get_remote_address,
             storage_uri=Config.RATE_LIMIT_STORAGE_URL,
             strategy="fixed-window"
         )
+        self.limiter.init_app(flask_app)  # Attach Limiter to Flask app
 
-        custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}")
-
-    def initialize(self, app: Flask):
-        """Attach the Flask app and finalize initialization."""
-        if not hasattr(app, "add_url_rule"):
-            raise RuntimeError("❌ ConnectionApiModule requires a valid Flask app instance.")
+        # Register routes
+        flask_app.add_url_rule("/health", "health_check", self.health_check)
+        flask_app.add_url_rule("/test", "test_route", self.test_route, methods=['GET', 'POST'])
         
-        self.app = app
+        # Add secure test endpoint
+        flask_app.add_url_rule("/secure-test", "secure_test", self.secure_test_route, methods=['POST'])
+        flask_app.add_url_rule("/login-test", "login_test", self.login_test_route, methods=['POST'])
+        
+        custom_log("✅ ConnectionApiModule successfully initialized with Flask app.")
+
+    def init_app(self, app_manager):
+        """Initialize the module with an AppManager instance."""
+        super().init_app(app_manager)
+        if not self.app:
+            raise RuntimeError("❌ ConnectionApiModule requires a valid Flask app instance.")
+            
+        # ✅ Use Redis for Flask-Limiter (Rate limiting)
+        self.limiter = Limiter(
+            key_func=get_remote_address,
+            storage_uri=Config.RATE_LIMIT_STORAGE_URL,
+            strategy="fixed-window"
+        )
         self.limiter.init_app(self.app)  # Attach Limiter to Flask app
 
-        # ✅ Register health check route
-        if "health_check" not in self.app.view_functions:
-            self.app.add_url_rule("/health", "health_check", self.health_check)
-
-        # ✅ Allow both GET and POST requests for /test
-        self.register_route('/test', self.test_route, methods=['GET', 'POST'])
+        # Register routes
+        self.app.add_url_rule("/health", "health_check", self.health_check)
+        self.app.add_url_rule("/test", "test_route", self.test_route, methods=['GET', 'POST'])
+        
+        # Add secure test endpoint
+        self.app.add_url_rule("/secure-test", "secure_test", self.secure_test_route, methods=['POST'])
+        self.app.add_url_rule("/login-test", "login_test", self.login_test_route, methods=['POST'])
         
         custom_log("✅ ConnectionApiModule successfully initialized with Flask app.")
 
@@ -228,3 +256,48 @@ class ConnectionApiModule:
         if ConnectionApiModule.db_pool:
             ConnectionApiModule.db_pool.closeall()
             custom_log("🔌 Database connection pool closed.")
+
+    def authenticate_request(self, token: str) -> dict:
+        """Authenticate a request using JWT token"""
+        return self.verify_jwt_token(token)
+        
+    def generate_auth_token(self, user_data: dict) -> str:
+        """Generate an authentication token"""
+        return self.get_jwt_token(user_data)
+
+    # Add these new test methods
+    def login_test_route(self):
+        """Test endpoint to get a JWT token"""
+        data = request.get_json()
+        if not data or 'username' not in data:
+            return jsonify({"error": "Username required"}), 400
+            
+        # For testing, generate a token with user data
+        user_data = {
+            "username": data['username'],
+            "role": "test_user",
+            "exp": int(time.time()) + 3600  # Token expires in 1 hour
+        }
+        
+        token = self.generate_auth_token(user_data)
+        return jsonify({
+            "token": token,
+            "message": "Test login successful"
+        })
+
+    def secure_test_route(self):
+        """Test endpoint that requires JWT authentication"""
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "No token provided"}), 401
+            
+        token = auth_header.split(' ')[1]
+        try:
+            # This will use our new SecureBaseModule's verify_jwt_token method
+            user_data = self.verify_jwt_token(token)
+            return jsonify({
+                "message": "Secure endpoint accessed successfully",
+                "user_data": user_data
+            })
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 401
