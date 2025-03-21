@@ -9,12 +9,19 @@ import os
 from core.managers.app_manager import AppManager
 from plugins.main_plugin.main_plugin_main import MainPlugin
 from tools.logger.custom_logging import custom_log
+from utils.secret_manager import get_secrets
 
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # ✅ Initialize Flask
 app = Flask(__name__)
+
+# Load secrets
+secrets = get_secrets()
+app.config['SECRET_KEY'] = secrets['APP_SECRET_KEY']
+app.config['JWT_SECRET_KEY'] = secrets['JWT_SECRET_KEY']
+app.config['ENCRYPTION_KEY'] = secrets['ENCRYPTION_KEY']
 
 # ✅ Enable Cross-Origin Resource Sharing (CORS) with credentials support
 CORS(app, supports_credentials=True)

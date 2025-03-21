@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  flask_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: silvella/recall_flask_app:latest
+    container_name: recall_flask
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"  # ✅ Ensure the port is exposed
+      - "5001:5001"
+    volumes:
+      - ./plugins:/app/plugins
+      - ./core:/app/core
+      - ./static:/app/static
+      - ./tools:/app/tools
+      - ./utils:/app/utils
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      init-secrets:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy  # ✅ Wait until PostgreSQL is ready
+      redis:
+        condition: service_healthy  # ✅ Wait until Redis is ready
+    networks:
+      recall_app_network:
+        ipv4_address: 192.168.178.100  # ✅ Assign static IP in local network
+    command: >
+      sh -c "
+      pip install --no-cache-dir -r /app/requirements.txt &&
+      python app.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+    environment:
+      - APP_SECRET_KEY_FILE=/run/secrets/app_secret_key
+      - JWT_SECRET_KEY_FILE=/run/secrets/jwt_secret_key
+      - ENCRYPTION_KEY_FILE=/run/secrets/encryption_key
+
+  init-secrets:
+    image: alpine
+    volumes:
+      - app_secrets:/secrets
+    command: >
+      sh -c "
+        [ ! -f /secrets/app_secret_key ] && head -c32 /dev/urandom | xxd -p > /secrets/app_secret_key;
+        [ ! -f /secrets/jwt_secret_key ] && head -c32 /dev/urandom | xxd -p > /secrets/jwt_secret_key;
+        [ ! -f /secrets/encryption_key ] && head -c32 /dev/urandom | xxd -p > /secrets/encryption_key;
+        chmod 400 /secrets/*
+      "
+
+  db:
+    image: postgres:latest
+    container_name: recall_db
+    env_file:
+      - .env
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata  # ✅ Use a subdirectory inside /data
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - recall_app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    container_name: recall_redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - recall_app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_secrets:
+    driver: local
+
+networks:
+  recall_app_network:
+    name: recall_app_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.178.0/24  # ✅ Ensure static IPs in a valid local subnet
