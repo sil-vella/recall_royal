@@ -1,0 +1,136 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+db_data/
+secrets/
+*.log
+*.db
+*.sqlite3
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# C extensions
+*.so
+
+# Django stuff:
+staticfiles/
+local_settings.py
+
+# Flask/Django instance folder
+instance/
+.webassets-cache
+
+# Unit test / coverage reports
+*.cover
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pip and package managers
+*.lock
+pip-log.txt
+pip-delete-this-directory.txt
+Pipfile
+Pipfile.lock
+poetry.lock
+
+# Celery beat schedule file
+celerybeat-schedule
+celerybeat.pid
+
+# Sphinx documentation
+docs/_build/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+
+# Mac OS X metadata
+.DS_Store
+
+# Environments
+.env.*
+
+# Docker
+docker-compose*.yml
+Dockerfile
+
+# Logs
+*.out
+*.err
+
+# VS Code
+.vscode/
+
+# IDE files
+.idea/
+
+# MyPy
+.mypy_cache/
+
+# Bandit
+.bandit/
+
+# App
+celebs_data/images/
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+*.webp

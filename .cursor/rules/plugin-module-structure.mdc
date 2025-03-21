@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Your rule content
+
+Please always consider the app structure as described in this doc file.
+[Python_App_System_Documentation.docx](mdc:Python_App_System_Documentation.docx)
