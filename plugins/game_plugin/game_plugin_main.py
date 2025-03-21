@@ -1,5 +1,4 @@
 from plugins.game_plugin.modules.leaderboard_module.leaderboard_module import LeaderboardModule
-from plugins.game_plugin.modules.rewards_module.rewards_module import RewardsModule
 from plugins.game_plugin.modules.player_module.player_manager import PlayerManager
 from plugins.game_plugin.modules.cards_module.card_manager import CardManager
 from plugins.game_plugin.modules.game_play_module.game_manager import GameManager
@@ -21,11 +20,6 @@ class GamePlugin:
             app_manager.module_manager.register_module(
                 "leaderboard_module", 
                 LeaderboardModule, 
-                app_manager=app_manager
-            )
-            app_manager.module_manager.register_module(
-                "rewards_module", 
-                RewardsModule, 
                 app_manager=app_manager
             )
             app_manager.module_manager.register_module(
