@@ -6,7 +6,79 @@ import inspect
 import types
 import re
 import sys
+from enum import Enum
+from typing import Dict, Any, Optional
 from utils.config.config import Config  # Import global config
+
+# Error codes and messages for standardized error handling
+class ErrorCode(Enum):
+    # Authentication Errors (1xx)
+    INVALID_CREDENTIALS = (100, "Invalid credentials")
+    TOKEN_EXPIRED = (101, "Authentication expired")
+    TOKEN_INVALID = (102, "Invalid authentication token")
+    TOKEN_MISSING = (103, "Authentication required")
+    
+    # Authorization Errors (2xx)
+    UNAUTHORIZED = (200, "Unauthorized access")
+    INSUFFICIENT_PERMISSIONS = (201, "Insufficient permissions")
+    
+    # Input Validation Errors (3xx)
+    INVALID_INPUT = (300, "Invalid input provided")
+    MISSING_REQUIRED_FIELD = (301, "Required field missing")
+    INVALID_FORMAT = (302, "Invalid format")
+    
+    # Resource Errors (4xx)
+    RESOURCE_NOT_FOUND = (400, "Resource not found")
+    RESOURCE_EXISTS = (401, "Resource already exists")
+    RESOURCE_CONFLICT = (402, "Resource conflict")
+    
+    # Database Errors (5xx)
+    DB_ERROR = (500, "Database error")
+    DB_CONNECTION_ERROR = (501, "Database connection error")
+    DB_QUERY_ERROR = (502, "Database query error")
+    
+    # Server Errors (9xx)
+    INTERNAL_ERROR = (900, "Internal server error")
+    SERVICE_UNAVAILABLE = (901, "Service temporarily unavailable")
+    
+    def __init__(self, code: int, message: str):
+        self.code = code
+        self.message = message
+
+class ErrorResponse:
+    def __init__(self, 
+                 error_code: ErrorCode,
+                 detail: Optional[str] = None,
+                 http_status: int = None):
+        self.error_code = error_code
+        self.detail = detail
+        # Map error code ranges to HTTP status codes
+        if http_status is None:
+            if 100 <= error_code.code < 200:
+                self.http_status = 401
+            elif 200 <= error_code.code < 300:
+                self.http_status = 403
+            elif 300 <= error_code.code < 400:
+                self.http_status = 400
+            elif 400 <= error_code.code < 500:
+                self.http_status = 404
+            elif 500 <= error_code.code < 600:
+                self.http_status = 503
+            else:
+                self.http_status = 500
+        else:
+            self.http_status = http_status
+
+    def to_dict(self) -> Dict[str, Any]:
+        response = {
+            "error": {
+                "code": self.error_code.code,
+                "message": self.error_code.message
+            }
+        }
+        if self.detail and Config.DEBUG:  # Only include details in debug mode
+            response["error"]["detail"] = self.detail
+        return response
 
 # ✅ Check the config's global logging flag first
 if not Config.LOGGING_ENABLED:
@@ -181,3 +253,28 @@ def add_logging_to_plugin(plugin, exclude_instances=None, exclude_packages=None)
         elif any(isinstance(obj, cls) for cls in exclude_instances):
             if Config.LOGGING_ENABLED:
                 custom_log(f"Skipping logging for excluded instance: {name}")
+
+def log_error(error_code: ErrorCode, detail: str = None, exc_info: Exception = None) -> ErrorResponse:
+    """
+    Log an error and return a standardized error response.
+    
+    Args:
+        error_code: The ErrorCode enum value
+        detail: Additional error details (only logged, not sent to client unless in debug mode)
+        exc_info: Exception object if available
+    
+    Returns:
+        ErrorResponse object with standardized error format
+    """
+    if Config.LOGGING_ENABLED and custom_logger:
+        error_msg = f"Error {error_code.code}: {error_code.message}"
+        if detail:
+            error_msg += f" - Details: {detail}"
+        if exc_info:
+            error_msg += f"\nException: {str(exc_info)}"
+            if hasattr(exc_info, '__traceback__'):
+                error_msg += f"\nTraceback: {''.join(traceback.format_tb(exc_info.__traceback__))}"
+        
+        custom_logger.error(error_msg)
+    
+    return ErrorResponse(error_code, detail)

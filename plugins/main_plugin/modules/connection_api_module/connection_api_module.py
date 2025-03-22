@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from redis import Redis
-from tools.logger.custom_logging import custom_log
+from tools.logger.custom_logging import custom_log, log_error, ErrorCode
 from utils.config.config import Config  # Import global config
 from ..base_module import SecureBaseModule
 import time
@@ -23,7 +23,8 @@ class ConnectionApiModule(SecureBaseModule):
     def __init__(self, app_manager=None):
         """Initialize the module with a database connection pool, Redis caching, and Flask-Limiter."""
         if not app_manager or not app_manager.flask_app:
-            raise RuntimeError("❌ AppManager is not initialized or Flask app is missing.")
+            error_response = log_error(ErrorCode.INTERNAL_ERROR, "AppManager is not initialized or Flask app is missing")
+            raise RuntimeError(error_response.to_dict()["error"]["message"])
 
         self.app = app_manager.flask_app
         self.app_manager = app_manager
@@ -31,7 +32,7 @@ class ConnectionApiModule(SecureBaseModule):
         # Initialize SecureBaseModule after validating app_manager
         super().__init__(app_manager)
 
-        # ✅ Initialize PostgreSQL connection pool
+        # Initialize PostgreSQL connection pool
         if not ConnectionApiModule.db_pool:
             ssl_mode = "require" if Config.USE_SSL else "disable"
             db_name = os.getenv("POSTGRES_DB", "recall_db")  # Use recall_db as default
@@ -48,18 +49,19 @@ class ConnectionApiModule(SecureBaseModule):
                 )
                 custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}")
             except psycopg2.Error as e:
-                custom_log(f"❌ Failed to initialize database connection pool: {e}")
-                raise RuntimeError(f"Failed to connect to database: {e}")
+                error_response = log_error(ErrorCode.DB_CONNECTION_ERROR, f"Failed to initialize database connection pool", e)
+                raise RuntimeError(error_response.to_dict()["error"]["message"])
 
-        # ✅ Initialize Redis client for caching
+        # Initialize Redis client for caching
         self.redis_client = Redis.from_url(Config.RATE_LIMIT_STORAGE_URL, decode_responses=True)
 
     def initialize(self, flask_app):
         """Initialize the module with additional setup after registration."""
         if not flask_app:
-            raise RuntimeError("❌ ConnectionApiModule requires a valid Flask app instance.")
+            error_response = log_error(ErrorCode.INTERNAL_ERROR, "ConnectionApiModule requires a valid Flask app instance")
+            raise RuntimeError(error_response.to_dict()["error"]["message"])
             
-        # ✅ Use Redis for Flask-Limiter (Rate limiting)
+        # Use Redis for Flask-Limiter (Rate limiting)
         self.limiter = Limiter(
             key_func=get_remote_address,
             storage_uri=Config.RATE_LIMIT_STORAGE_URL,
@@ -114,10 +116,11 @@ class ConnectionApiModule(SecureBaseModule):
             if connection:
                 custom_log("✅ Successfully retrieved database connection from pool.")
             else:
-                custom_log("❌ Failed to retrieve database connection from pool.")
+                error_response = log_error(ErrorCode.DB_CONNECTION_ERROR, "Failed to retrieve database connection from pool")
+                raise RuntimeError(error_response.to_dict()["error"]["message"])
             return connection
         except Exception as e:
-            custom_log(f"❌ Database connection retrieval error: {e}")
+            error_response = log_error(ErrorCode.DB_CONNECTION_ERROR, "Database connection retrieval error", e)
             return None
 
     def release_connection(self, connection):
@@ -143,7 +146,7 @@ class ConnectionApiModule(SecureBaseModule):
             cursor.close()
             return result
         except psycopg2.Error as e:
-            custom_log(f"❌ Error executing query: {e}")
+            error_response = log_error(ErrorCode.DB_QUERY_ERROR, "Error executing query", e)
             connection.rollback()
             return None
         finally:
@@ -152,7 +155,7 @@ class ConnectionApiModule(SecureBaseModule):
     def fetch_from_db(self, query, params=None, as_dict=False):
         connection = self.get_connection()
         if not connection:
-            custom_log("❌ Failed to get database connection.")
+            error_response = log_error(ErrorCode.DB_CONNECTION_ERROR, "Failed to get database connection")
             return None
         try:
             cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor if as_dict else None)
@@ -161,7 +164,7 @@ class ConnectionApiModule(SecureBaseModule):
             cursor.close()
             return [dict(row) for row in result] if as_dict else result
         except psycopg2.Error as e:
-            custom_log(f"❌ Database error in SELECT: {e}")
+            error_response = log_error(ErrorCode.DB_QUERY_ERROR, "Database error in SELECT", e)
             connection.rollback()
             return None
         finally:
@@ -223,7 +226,8 @@ class ConnectionApiModule(SecureBaseModule):
         """Test endpoint that requires JWT authentication"""
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({"error": "No token provided"}), 401
+            error_response = log_error(ErrorCode.TOKEN_MISSING, "No token provided in Authorization header")
+            return jsonify(error_response.to_dict()), error_response.http_status
             
         token = auth_header.split(' ')[1]
         try:
@@ -234,4 +238,5 @@ class ConnectionApiModule(SecureBaseModule):
                 "user_data": user_data
             })
         except ValueError as e:
-            return jsonify({"error": str(e)}), 401
+            error_response = log_error(ErrorCode.TOKEN_INVALID, str(e))
+            return jsonify(error_response.to_dict()), error_response.http_status

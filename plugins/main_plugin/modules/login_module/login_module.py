@@ -1,7 +1,7 @@
 import bcrypt
 import hashlib
 from flask import request, jsonify
-from tools.logger.custom_logging import custom_log
+from tools.logger.custom_logging import custom_log, log_error, ErrorCode
 from core.managers.module_manager import ModuleManager
 import jwt
 import yaml
@@ -67,15 +67,15 @@ class LoginModule(SecureBaseModule):
                 user_id = data.get("user_id")
 
                 if not user_id:
-                    return jsonify({"error": "User ID is required"}), 400
+                    error_response = log_error(ErrorCode.MISSING_REQUIRED_FIELD, "User ID is required")
+                    return jsonify(error_response.to_dict()), error_response.http_status
 
-                # ✅ Call the proper delete method
                 response, status_code = self.delete_user_data(user_id)
                 return jsonify(response), status_code
 
             except Exception as e:
-                custom_log(f"❌ Error in delete-user API: {e}")
-                return jsonify({"error": "Server error"}), 500
+                error_response = log_error(ErrorCode.INTERNAL_ERROR, f"Error in delete-user API", e)
+                return jsonify(error_response.to_dict()), error_response.http_status
         
         return protected_delete()
 
@@ -207,24 +207,24 @@ class LoginModule(SecureBaseModule):
             password = data.get("password")
 
             if not username or not email or not password:
-                custom_log("⚠️ Missing required fields in registration request.")
-                return jsonify({"error": "Missing required fields"}), 400
+                error_response = log_error(ErrorCode.MISSING_REQUIRED_FIELD, "Missing username, email, or password")
+                return jsonify(error_response.to_dict()), error_response.http_status
 
-            # ✅ Check if email already exists
+            # Check if email already exists
             query = "SELECT id FROM users WHERE email = %s;"
             existing_user = self.connection_api_module.fetch_from_db(query, (email,))
             if existing_user:
-                custom_log(f"⚠️ Registration failed: Email '{email}' already exists.")
-                return jsonify({"error": "Email is already registered"}), 400
+                error_response = log_error(ErrorCode.RESOURCE_EXISTS, f"Email '{email}' already registered")
+                return jsonify(error_response.to_dict()), error_response.http_status
 
-            # ✅ Insert new user
+            # Insert new user
             hashed_password = self.hash_password(password)
             insert_user_query = "INSERT INTO users (username, email, password) VALUES (%s, %s, %s) RETURNING id;"
             user_result = self.connection_api_module.execute_query(insert_user_query, (username, email, hashed_password))
 
             if not user_result:
-                custom_log("❌ Insert failed: No ID returned from insert statement.")
-                return jsonify({"error": "User registration failed."}), 500
+                error_response = log_error(ErrorCode.DB_ERROR, "Failed to insert new user")
+                return jsonify(error_response.to_dict()), error_response.http_status
 
             custom_log(f"✅ User '{username}' registered successfully with ID {user_result[0][0]}.")
             return jsonify({
@@ -233,8 +233,8 @@ class LoginModule(SecureBaseModule):
             }), 200
 
         except Exception as e:
-            custom_log(f"❌ Error registering user: {e}")
-            return jsonify({"error": f"Server error: {str(e)}"}), 500
+            error_response = log_error(ErrorCode.INTERNAL_ERROR, "Error during user registration", e)
+            return jsonify(error_response.to_dict()), error_response.http_status
 
     def login_user(self):
         """Handles user login."""
@@ -246,21 +246,21 @@ class LoginModule(SecureBaseModule):
             password = data.get("password")
 
             if not email or not password:
-                custom_log("⚠️ Login failed: Missing email or password.")
-                return jsonify({"error": "Missing email or password"}), 400
+                error_response = log_error(ErrorCode.MISSING_REQUIRED_FIELD, "Missing email or password")
+                return jsonify(error_response.to_dict()), error_response.http_status
 
             query = "SELECT id, username, password FROM users WHERE email = %s;"
             user = self.connection_api_module.fetch_from_db(query, (email,), as_dict=True)
 
             if not user:
-                custom_log(f"⚠️ Login failed: Email '{email}' not found.")
-                return jsonify({"error": "Invalid credentials"}), 401
+                error_response = log_error(ErrorCode.INVALID_CREDENTIALS, f"Email '{email}' not found")
+                return jsonify(error_response.to_dict()), error_response.http_status
 
             user = user[0]  # Get first row since fetch_from_db returns a list
             
             if not self.check_password(password, user["password"]):
-                custom_log(f"⚠️ Login failed: Invalid password for email '{email}'.")
-                return jsonify({"error": "Invalid credentials"}), 401
+                error_response = log_error(ErrorCode.INVALID_CREDENTIALS, f"Invalid password for email '{email}'")
+                return jsonify(error_response.to_dict()), error_response.http_status
 
             # Generate JWT token using SecureBaseModule's method
             payload = {
@@ -281,8 +281,8 @@ class LoginModule(SecureBaseModule):
             }), 200
 
         except Exception as e:
-            custom_log(f"❌ Error during login: {e}")
-            return jsonify({"error": "Server error"}), 500
+            error_response = log_error(ErrorCode.INTERNAL_ERROR, "Error during login", e)
+            return jsonify(error_response.to_dict()), error_response.http_status
 
     def secure_endpoint(self):
         """Test endpoint that requires JWT authentication."""
