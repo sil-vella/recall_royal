@@ -39,7 +39,8 @@ class ConnectionApiModule(SecureBaseModule):
 
             try:
                 ConnectionApiModule.db_pool = psycopg2.pool.SimpleConnectionPool(
-                    1, 10,  # Min and max connections in the pool
+                    Config.DB_POOL_MIN_CONN,
+                    Config.DB_POOL_MAX_CONN,
                     user=os.getenv("POSTGRES_USER"),
                     password=os.getenv("POSTGRES_PASSWORD"),
                     host=os.getenv("DB_HOST", "127.0.0.1"),
@@ -47,7 +48,7 @@ class ConnectionApiModule(SecureBaseModule):
                     database=db_name,
                     sslmode=ssl_mode  # Dynamically set SSL mode
                 )
-                custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}")
+                custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}, Pool size: {Config.DB_POOL_MIN_CONN}-{Config.DB_POOL_MAX_CONN}")
             except psycopg2.Error as e:
                 error_response = log_error(ErrorCode.DB_CONNECTION_ERROR, f"Failed to initialize database connection pool", e)
                 raise RuntimeError(error_response.to_dict()["error"]["message"])
