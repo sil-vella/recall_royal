@@ -140,3 +140,10 @@ secrets/
 *.pem
 *.key
 *.crt
+
+# Database files
+data/postgres/pgdata/
+data/redis/dump.rdb
+data/redis/*.rdb
+data/postgres/
+*.pid

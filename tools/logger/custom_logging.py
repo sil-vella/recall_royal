@@ -6,6 +6,7 @@ import inspect
 import types
 import re
 import sys
+import traceback
 from enum import Enum
 from typing import Dict, Any, Optional
 from utils.config.config import Config  # Import global config
@@ -278,3 +279,13 @@ def log_error(error_code: ErrorCode, detail: str = None, exc_info: Exception = N
         custom_logger.error(error_msg)
     
     return ErrorResponse(error_code, detail)
+
+def get_logger(name):
+    """Get a logger instance for the given name."""
+    logger = logging.getLogger(name)
+    if not logger.handlers:  # Only add handler if it doesn't already have one
+        handler = logging.StreamHandler()
+        handler.setFormatter(CustomFormatter())
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO if not Config.DEBUG else logging.DEBUG)
+    return logger

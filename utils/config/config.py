@@ -1,6 +1,9 @@
 import os
 
 class Config:
+    # Debug mode
+    DEBUG = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1")
+
     # Toggle SSL for PostgreSQL
     USE_SSL = os.getenv("USE_SSL", "False").lower() in ("true", "1")
 
