@@ -8,12 +8,13 @@ import yaml
 import os
 import time
 from datetime import datetime, timedelta
-class LoginModule:
+from ..base_module import SecureBaseModule
+
+class LoginModule(SecureBaseModule):
     def __init__(self, app_manager=None):
         """Initialize the LoginModule."""
-        self.app_manager = app_manager
+        super().__init__(app_manager)
         self.connection_api_module = self.get_connection_api_module()
-        self.SECRET_KEY = "your_secret_key"
 
         if not self.connection_api_module:
             raise RuntimeError("LoginModule: Failed to retrieve ConnectionModule from ModuleManager.")
@@ -47,33 +48,36 @@ class LoginModule:
 
     def register_routes(self):
         """Register authentication routes."""
-        if not self.connection_api_module:
-            raise RuntimeError("ConnectionModule is not available yet.")
+        if not self.app:
+            raise RuntimeError("Flask app is not available yet.")
 
-        self.connection_api_module.register_route('/register', self.register_user, methods=['POST'])
-        self.connection_api_module.register_route('/login', self.login_user, methods=['POST'])
-        self.connection_api_module.register_route('/delete-user', self.delete_user_request, methods=['POST'])  # ✅ Register route
+        self.app.add_url_rule('/register', 'register', self.register_user, methods=['POST'])
+        self.app.add_url_rule('/login', 'login', self.login_user, methods=['POST'])
+        self.app.add_url_rule('/delete-user', 'delete_user', self.delete_user_request, methods=['POST'])
+        self.app.add_url_rule('/secure', 'secure', self.secure_endpoint, methods=['GET'])
 
         custom_log("🌐 LoginModule: Authentication routes registered successfully.")
 
     def delete_user_request(self):
         """API Endpoint to delete a user and their data."""
-        try:
-            data = request.get_json()
-            user_id = data.get("user_id")
+        @self.require_auth
+        def protected_delete():
+            try:
+                data = request.get_json()
+                user_id = data.get("user_id")
 
-            if not user_id:
-                return jsonify({"error": "User ID is required"}), 400
+                if not user_id:
+                    return jsonify({"error": "User ID is required"}), 400
 
-            # ✅ Call the proper delete method
-            response, status_code = self.delete_user_data(user_id)
-            return jsonify(response), status_code
+                # ✅ Call the proper delete method
+                response, status_code = self.delete_user_data(user_id)
+                return jsonify(response), status_code
 
-        except Exception as e:
-            custom_log(f"❌ Error in delete-user API: {e}")
-            return jsonify({"error": "Server error"}), 500
-
-
+            except Exception as e:
+                custom_log(f"❌ Error in delete-user API: {e}")
+                return jsonify({"error": "Server error"}), 500
+        
+        return protected_delete()
 
     def hash_password(self, password):
         """Hash the password using bcrypt."""
@@ -106,7 +110,6 @@ class LoginModule:
         except Exception as e:
             custom_log(f"❌ Error saving guessed names: {e}")
 
-
     def _get_category_progress(self, user_id):
         """Fetches category-based levels & points."""
         query = """
@@ -136,7 +139,6 @@ class LoginModule:
 
         except Exception as e:
             custom_log(f"❌ Error saving category progress: {e}")
-
 
     def _get_guessed_names(self, user_id):
         """Retrieves guessed names grouped by category & level."""
@@ -218,14 +220,17 @@ class LoginModule:
             # ✅ Insert new user
             hashed_password = self.hash_password(password)
             insert_user_query = "INSERT INTO users (username, email, password) VALUES (%s, %s, %s) RETURNING id;"
-            user_result = self.connection_api_module.fetch_from_db(insert_user_query, (username, email, hashed_password))
+            user_result = self.connection_api_module.execute_query(insert_user_query, (username, email, hashed_password))
 
             if not user_result:
                 custom_log("❌ Insert failed: No ID returned from insert statement.")
                 return jsonify({"error": "User registration failed."}), 500
 
-            custom_log(f"✅ User '{username}' registered successfully.")
-            return jsonify({"message": "User registered successfully"}), 200
+            custom_log(f"✅ User '{username}' registered successfully with ID {user_result[0][0]}.")
+            return jsonify({
+                "message": "User registered successfully",
+                "user_id": user_result[0][0]
+            }), 200
 
         except Exception as e:
             custom_log(f"❌ Error registering user: {e}")
@@ -251,24 +256,40 @@ class LoginModule:
                 custom_log(f"⚠️ Login failed: Email '{email}' not found.")
                 return jsonify({"error": "Invalid credentials"}), 401
 
-            if not self.check_password(password, user[0]['password']):
-                custom_log(f"⚠️ Login failed: Incorrect password for email '{email}'.")
+            user = user[0]  # Get first row since fetch_from_db returns a list
+            
+            if not self.check_password(password, user["password"]):
+                custom_log(f"⚠️ Login failed: Invalid password for email '{email}'.")
                 return jsonify({"error": "Invalid credentials"}), 401
 
-            user_id = user[0]['id']
-            custom_log(f"✅ User ID {user_id} authenticated successfully.")
+            # Generate JWT token using SecureBaseModule's method
+            payload = {
+                "user_id": user["id"],
+                "username": user["username"],
+                "exp": datetime.utcnow() + timedelta(days=1)  # Token expires in 1 day
+            }
+            token = self.get_jwt_token(payload)
 
-            token = jwt.encode({"user_id": user_id, "exp": datetime.utcnow() + timedelta(hours=24)}, self.SECRET_KEY, algorithm="HS256")
-
+            custom_log(f"✅ User '{user['username']}' logged in successfully.")
             return jsonify({
                 "message": "Login successful",
+                "token": token,
                 "user": {
-                    "id": user_id,
-                    "username": user[0]["username"],
-                },
-                "token": token
+                    "id": user["id"],
+                    "username": user["username"]
+                }
             }), 200
 
         except Exception as e:
             custom_log(f"❌ Error during login: {e}")
             return jsonify({"error": "Server error"}), 500
+
+    def secure_endpoint(self):
+        """Test endpoint that requires JWT authentication."""
+        @self.require_auth
+        def protected():
+            return jsonify({
+                "message": "You have accessed a secure endpoint",
+                "status": "success"
+            }), 200
+        return protected()

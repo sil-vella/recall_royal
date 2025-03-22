@@ -134,3 +134,9 @@ celebs_data/images/
 *.tiff
 *.svg
 *.webp
+
+# Secrets
+secrets/
+*.pem
+*.key
+*.crt

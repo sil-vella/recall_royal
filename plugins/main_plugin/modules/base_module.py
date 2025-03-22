@@ -1,5 +1,6 @@
 from typing import Optional
-from flask import Flask
+from flask import Flask, request, jsonify
+from functools import wraps
 
 class BaseModule:
     """Base module for all plugin modules"""
@@ -56,4 +57,20 @@ class SecureBaseModule(BaseModule):
                 algorithms=['HS256']
             )
         except jwt.InvalidTokenError:
-            raise ValueError("Invalid token") 
+            raise ValueError("Invalid token")
+
+    def require_auth(self, f):
+        """Decorator to protect routes with JWT authentication."""
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({"error": "No token provided"}), 401
+                
+            token = auth_header.split(' ')[1]
+            try:
+                user_data = self.verify_jwt_token(token)
+                return f(*args, **kwargs)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 401
+        return decorated 

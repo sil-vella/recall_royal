@@ -62,12 +62,12 @@ services:
     env_file:
       - .env
     environment:
-      - PGDATA=/var/lib/postgresql/data/pgdata  # ✅ Use a subdirectory inside /data
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - PGDATA=/var/lib/postgresql/data/pgdata  # ✅ Use a subdirectory for better organization
     volumes:
-      - ./db_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data  # ✅ Use local directory for persistence
       - ./init-scripts:/docker-entrypoint-initdb.d
     networks:
       - recall_app_network
@@ -76,13 +76,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    command: postgres -c 'max_connections=100' -c 'shared_buffers=256MB'  # ✅ Basic performance tuning
 
   redis:
     image: redis:latest
     container_name: recall_redis
     restart: always
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data  # ✅ Use local directory for persistence
     networks:
       - recall_app_network
     healthcheck:
@@ -92,8 +93,6 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
-  redis_data:
   app_secrets:
     driver: local
 

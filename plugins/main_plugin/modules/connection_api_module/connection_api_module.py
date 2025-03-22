@@ -2,7 +2,6 @@ import os
 import psycopg2
 import psycopg2.extras
 import psycopg2.pool
-import bcrypt
 import jwt
 from cryptography.fernet import Fernet
 from flask import Flask, request, jsonify
@@ -15,11 +14,11 @@ from ..base_module import SecureBaseModule
 import time
 
 class ConnectionApiModule(SecureBaseModule):
-    """Handles database connection pooling, Redis caching, authentication, rate-limiting, and API security."""
+    """Handles database connection pooling, Redis caching, and API security."""
     
     db_pool = None
     SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")  # Ensure this is securely stored
-    ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())  # Used for encryption
+    ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
 
     def __init__(self, app_manager=None):
         """Initialize the module with a database connection pool, Redis caching, and Flask-Limiter."""
@@ -35,21 +34,25 @@ class ConnectionApiModule(SecureBaseModule):
         # ✅ Initialize PostgreSQL connection pool
         if not ConnectionApiModule.db_pool:
             ssl_mode = "require" if Config.USE_SSL else "disable"
+            db_name = os.getenv("POSTGRES_DB", "recall_db")  # Use recall_db as default
 
-            ConnectionApiModule.db_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 10,  # Min and max connections in the pool
-                user=os.getenv("POSTGRES_USER"),
-                password=os.getenv("POSTGRES_PASSWORD"),
-                host=os.getenv("DB_HOST", "127.0.0.1"),
-                port=os.getenv("DB_PORT", "5432"),
-                database=os.getenv("POSTGRES_DB"),
-                sslmode=ssl_mode  # Dynamically set SSL mode
-            )
+            try:
+                ConnectionApiModule.db_pool = psycopg2.pool.SimpleConnectionPool(
+                    1, 10,  # Min and max connections in the pool
+                    user=os.getenv("POSTGRES_USER"),
+                    password=os.getenv("POSTGRES_PASSWORD"),
+                    host=os.getenv("DB_HOST", "127.0.0.1"),
+                    port=os.getenv("DB_PORT", "5432"),
+                    database=db_name,
+                    sslmode=ssl_mode  # Dynamically set SSL mode
+                )
+                custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}")
+            except psycopg2.Error as e:
+                custom_log(f"❌ Failed to initialize database connection pool: {e}")
+                raise RuntimeError(f"Failed to connect to database: {e}")
 
         # ✅ Initialize Redis client for caching
         self.redis_client = Redis.from_url(Config.RATE_LIMIT_STORAGE_URL, decode_responses=True)
-
-        custom_log(f"🔌 Database connection initialized with SSL mode: {ssl_mode}")
 
     def initialize(self, flask_app):
         """Initialize the module with additional setup after registration."""
@@ -70,7 +73,6 @@ class ConnectionApiModule(SecureBaseModule):
         
         # Add secure test endpoint
         flask_app.add_url_rule("/secure-test", "secure_test", self.secure_test_route, methods=['POST'])
-        flask_app.add_url_rule("/login-test", "login_test", self.login_test_route, methods=['POST'])
         
         custom_log("✅ ConnectionApiModule successfully initialized with Flask app.")
 
@@ -94,14 +96,12 @@ class ConnectionApiModule(SecureBaseModule):
         
         # Add secure test endpoint
         self.app.add_url_rule("/secure-test", "secure_test", self.secure_test_route, methods=['POST'])
-        self.app.add_url_rule("/login-test", "login_test", self.login_test_route, methods=['POST'])
         
         custom_log("✅ ConnectionApiModule successfully initialized with Flask app.")
 
     def health_check(self):
         """Health check endpoint for Flask API."""
         return jsonify({"status": "healthy", "message": "API is running."}), 200
-
 
     # ================================
     # 🚀 DATABASE CONNECTION MANAGEMENT
@@ -120,7 +120,6 @@ class ConnectionApiModule(SecureBaseModule):
             custom_log(f"❌ Database connection retrieval error: {e}")
             return None
 
-
     def release_connection(self, connection):
         """Release a database connection back to the pool."""
         ConnectionApiModule.db_pool.putconn(connection)
@@ -131,12 +130,22 @@ class ConnectionApiModule(SecureBaseModule):
         try:
             cursor = connection.cursor()
             cursor.execute(query, params or ())
+            
+            # Check if the query contains RETURNING clause
+            result = None
+            if "RETURNING" in query.upper():
+                result = cursor.fetchall()
+                custom_log("✅ Query executed successfully with returned data")
+            else:
+                custom_log("✅ Query executed successfully")
+            
             connection.commit()
             cursor.close()
-            custom_log("✅ Query executed successfully")
+            return result
         except psycopg2.Error as e:
             custom_log(f"❌ Error executing query: {e}")
             connection.rollback()
+            return None
         finally:
             self.release_connection(connection)
 
@@ -158,7 +167,6 @@ class ConnectionApiModule(SecureBaseModule):
         finally:
             self.release_connection(connection)
 
-
     # ================================
     # 🔄 REDIS CACHE MANAGEMENT
     # ================================
@@ -179,51 +187,6 @@ class ConnectionApiModule(SecureBaseModule):
         self.redis_client.delete(key)
         custom_log(f"🗑️ Cleared rate limit data for key: {key}")
 
-    # ================================
-    # 🔑 AUTHENTICATION & SECURITY
-    # ================================
-
-    def hash_password(self, password):
-        """Hash passwords securely using bcrypt."""
-        salt = bcrypt.gensalt()
-        return bcrypt.hashpw(password.encode(), salt).decode()
-
-    def verify_password(self, password, hashed_password):
-        """Verify passwords securely."""
-        return bcrypt.checkpw(password.encode(), hashed_password.encode())
-
-    def encrypt_data(self, data):
-        """Encrypt sensitive data using Fernet."""
-        cipher = Fernet(self.ENCRYPTION_KEY.encode())
-        return cipher.encrypt(data.encode()).decode()
-
-    def decrypt_data(self, encrypted_data):
-        """Decrypt sensitive data."""
-        cipher = Fernet(self.ENCRYPTION_KEY.encode())
-        return cipher.decrypt(encrypted_data.encode()).decode()
-
-    def generate_token(self, user_id, is_admin=False):
-        """Generate a JWT token."""
-        return jwt.encode({"user_id": user_id, "is_admin": is_admin}, self.SECRET_KEY, algorithm="HS256")
-
-    def verify_token(self, token):
-        """Verify a JWT token."""
-        try:
-            return jwt.decode(token, self.SECRET_KEY, algorithms=["HS256"])
-        except jwt.ExpiredSignatureError:
-            return None
-        except jwt.InvalidTokenError:
-            return None
-        
-    def protected_route(self, f):
-        """Decorator to protect routes with JWT authentication."""
-        def wrapper(*args, **kwargs):
-            token = request.headers.get("Authorization")
-            if not token or not self.verify_token(token):
-                return {"error": "Unauthorized"}, 401
-            return f(*args, **kwargs)
-        return wrapper
-
     def register_route(self, path, view_func, methods=None, endpoint=None, require_auth=False):
         """Register a Flask route with optional authentication, preventing duplicate registration."""
         if self.app is None:
@@ -239,11 +202,10 @@ class ConnectionApiModule(SecureBaseModule):
             return  # Exit to prevent overwriting
 
         if require_auth:
-            view_func = self.protected_route(view_func)
+            view_func = self.require_auth(view_func)  # Using SecureBaseModule's require_auth
 
         self.app.add_url_rule(path, endpoint=endpoint, view_func=view_func, methods=methods)
         custom_log(f"🌐 Route registered: {path} [{', '.join(methods)}] as '{endpoint}'")
-
         
     def test_route(self):
         """A simple test route to verify API is working."""
@@ -257,34 +219,6 @@ class ConnectionApiModule(SecureBaseModule):
             ConnectionApiModule.db_pool.closeall()
             custom_log("🔌 Database connection pool closed.")
 
-    def authenticate_request(self, token: str) -> dict:
-        """Authenticate a request using JWT token"""
-        return self.verify_jwt_token(token)
-        
-    def generate_auth_token(self, user_data: dict) -> str:
-        """Generate an authentication token"""
-        return self.get_jwt_token(user_data)
-
-    # Add these new test methods
-    def login_test_route(self):
-        """Test endpoint to get a JWT token"""
-        data = request.get_json()
-        if not data or 'username' not in data:
-            return jsonify({"error": "Username required"}), 400
-            
-        # For testing, generate a token with user data
-        user_data = {
-            "username": data['username'],
-            "role": "test_user",
-            "exp": int(time.time()) + 3600  # Token expires in 1 hour
-        }
-        
-        token = self.generate_auth_token(user_data)
-        return jsonify({
-            "token": token,
-            "message": "Test login successful"
-        })
-
     def secure_test_route(self):
         """Test endpoint that requires JWT authentication"""
         auth_header = request.headers.get('Authorization')
@@ -293,7 +227,7 @@ class ConnectionApiModule(SecureBaseModule):
             
         token = auth_header.split(' ')[1]
         try:
-            # This will use our new SecureBaseModule's verify_jwt_token method
+            # Using SecureBaseModule's verify_jwt_token method
             user_data = self.verify_jwt_token(token)
             return jsonify({
                 "message": "Secure endpoint accessed successfully",
