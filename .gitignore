@@ -40,10 +40,6 @@ secrets/
 *.db
 *.sqlite3
 
-# Docker
-.docker/
-docker-compose.override.yml
-
 # Testing
 .coverage
 htmlcov/
@@ -103,7 +99,6 @@ pip-log.txt
 .env.*
 
 # Docker
-docker-compose*.yml
 Dockerfile
 
 # Logs
