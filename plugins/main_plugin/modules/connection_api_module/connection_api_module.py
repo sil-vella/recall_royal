@@ -12,7 +12,7 @@ from tools.logger.custom_logging import custom_log, log_error, ErrorCode, get_lo
 from utils.config.config import Config  # Import global config
 from ..base_module import SecureBaseModule
 import time
-from utils.redis.redis_manager import RedisManager
+from core.managers.redis_manager import RedisManager
 
 logger = get_logger(__name__)
 
