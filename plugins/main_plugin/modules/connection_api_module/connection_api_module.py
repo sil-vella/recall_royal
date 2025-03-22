@@ -8,10 +8,13 @@ from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from redis import Redis
-from tools.logger.custom_logging import custom_log, log_error, ErrorCode
+from tools.logger.custom_logging import custom_log, log_error, ErrorCode, get_logger
 from utils.config.config import Config  # Import global config
 from ..base_module import SecureBaseModule
 import time
+from utils.redis.redis_manager import RedisManager
+
+logger = get_logger(__name__)
 
 class ConnectionApiModule(SecureBaseModule):
     """Handles database connection pooling, Redis caching, and API security."""
@@ -55,6 +58,7 @@ class ConnectionApiModule(SecureBaseModule):
 
         # Initialize Redis client for caching
         self.redis_client = Redis.from_url(Config.RATE_LIMIT_STORAGE_URL, decode_responses=True)
+        self.redis_manager = RedisManager.get_instance()
 
     def initialize(self, flask_app):
         """Initialize the module with additional setup after registration."""
@@ -103,8 +107,21 @@ class ConnectionApiModule(SecureBaseModule):
         custom_log("✅ ConnectionApiModule successfully initialized with Flask app.")
 
     def health_check(self):
-        """Health check endpoint for Flask API."""
-        return jsonify({"status": "healthy", "message": "API is running."}), 200
+        """Health check endpoint that verifies Redis connection"""
+        try:
+            redis_client = self.redis_manager.get_client()
+            redis_client.ping()
+            return jsonify({
+                "status": "healthy",
+                "redis": "connected"
+            }), 200
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            return jsonify({
+                "status": "unhealthy",
+                "redis": "disconnected",
+                "error": str(e)
+            }), 500
 
     # ================================
     # 🚀 DATABASE CONNECTION MANAGEMENT
@@ -212,9 +229,21 @@ class ConnectionApiModule(SecureBaseModule):
         custom_log(f"🌐 Route registered: {path} [{', '.join(methods)}] as '{endpoint}'")
         
     def test_route(self):
-        """A simple test route to verify API is working."""
-        custom_log("🟢 Test route accessed successfully.")
-        return jsonify({"message": "Test route working!"}), 200
+        """Test route that uses Redis for basic operations"""
+        try:
+            redis_client = self.redis_manager.get_client()
+            redis_client.incr('test_counter')
+            count = redis_client.get('test_counter')
+            return jsonify({
+                "message": "Test route working",
+                "counter": count
+            }), 200
+        except Exception as e:
+            logger.error(f"Test route failed: {str(e)}")
+            return jsonify({
+                "error": "Test route failed",
+                "details": str(e)
+            }), 500
 
     def dispose(self):
         """Dispose of database connections and cleanup resources."""
